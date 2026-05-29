@@ -168,22 +168,14 @@ def _is_admin(item: Dict) -> bool:
     return bool(_ADMIN_RE.search(item["question"]) or _ADMIN_RE.search(item["answer"]))
 
 
-def select_eval_set(
+def filter_candidates(
     items: List[Dict],
-    rag,
-    n: int = 50,
-    seed: int = 0,
-    coverage_threshold: float = 0.5,
     min_question_chars: int = 20,
     min_answer_chars: int = 40,
     max_non_ascii_ratio: float = 0.05,
 ) -> List[Dict]:
-    """Filter to answerable guidance questions and deterministically sample ``n``.
-
-    Filtering keeps answered Help/Tool questions, drops administrative/curation
-    requests, and gates on corpus coverage (top-1 retrieval similarity).
-    Each kept item gets a cleaned ``reference_answer``.
-    """
+    """Apply all content filters (no corpus-coverage gate) and return the
+    surviving answered Help/Tool Q&A, each with a cleaned ``reference_answer``."""
     candidates = []
     for it in items:
         if not it["answered"] or it["type"] not in ANSWERABLE_TYPES:
@@ -204,6 +196,29 @@ def select_eval_set(
         if _is_decline(cleaned):
             continue
         candidates.append({**it, "reference_answer": cleaned})
+    return candidates
+
+
+def select_eval_set(
+    items: List[Dict],
+    rag,
+    n: int = 50,
+    seed: int = 0,
+    coverage_threshold: float = 0.5,
+    min_question_chars: int = 20,
+    min_answer_chars: int = 40,
+    max_non_ascii_ratio: float = 0.05,
+) -> List[Dict]:
+    """Filter to answerable guidance questions and deterministically sample ``n``.
+
+    Filtering keeps answered Help/Tool questions, drops administrative/curation
+    requests, and gates on corpus coverage (top-1 retrieval similarity).
+    Each kept item gets a cleaned ``reference_answer``.
+    """
+    candidates = filter_candidates(
+        items, min_question_chars=min_question_chars,
+        min_answer_chars=min_answer_chars, max_non_ascii_ratio=max_non_ascii_ratio,
+    )
 
     # Deterministic order before the coverage gate.
     candidates.sort(key=lambda x: x["id"])
@@ -259,13 +274,31 @@ def dump_all_qa(qa_report: str, out_path: str) -> List[Dict]:
     return items
 
 
+def dump_candidates(qa_report: str, out_path: str) -> List[Dict]:
+    """Write the content-filtered candidate Q&A (pre coverage-gate) to JSONL."""
+    candidates = filter_candidates(parse_qa_report(qa_report))
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        for it in candidates:
+            f.write(json.dumps(it, ensure_ascii=False) + "\n")
+    return candidates
+
+
 if __name__ == "__main__":
     import argparse
 
-    p = argparse.ArgumentParser(description="Dump all website Q&A to JSONL")
+    p = argparse.ArgumentParser(description="Export website Q&A to JSONL")
     p.add_argument("--qa-report", default="qa_report.html")
-    p.add_argument("--out", default="data/eval/all_qa.jsonl")
+    p.add_argument("--out", default="data/eval/all_qa.jsonl", help="Output for --all")
+    p.add_argument("--candidates-out", default=None,
+                   help="If set, also write the content-filtered candidate Q&A here")
+    p.add_argument("--all", action="store_true", help="Dump all parsed Q&A (default)")
     a = p.parse_args()
-    items = dump_all_qa(a.qa_report, a.out)
-    answered = sum(1 for i in items if i["answered"])
-    print(f"Wrote {len(items)} Q&A ({answered} answered) to {a.out}")
+
+    if a.candidates_out:
+        cands = dump_candidates(a.qa_report, a.candidates_out)
+        print(f"Wrote {len(cands)} filtered candidate Q&A to {a.candidates_out}")
+    if a.all or not a.candidates_out:
+        items = dump_all_qa(a.qa_report, a.out)
+        answered = sum(1 for i in items if i["answered"])
+        print(f"Wrote {len(items)} Q&A ({answered} answered) to {a.out}")
