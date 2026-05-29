@@ -16,8 +16,6 @@ Two evaluation *methods* are applied to two *stages*:
 
 ## 1. Reference-based retrieval
 
-### How we decide if a retrieved chunk is "relevant"
-
 Normally, scoring retrieval needs a human to mark, for each question, which
 chunks in the corpus are the correct ones to retrieve ("gold labels"). We don't
 have that. Instead we use the question's **reference answer** (the real human
@@ -216,9 +214,9 @@ Default weights (`eval/scoring.py:DEFAULT_WEIGHTS`, override with `--weights`):
 | Family | Weight | Why this weight |
 |---|---|---|
 | judge_generation | **0.35** | A strong judge rating correctness/faithfulness is the closest proxy to "is the answer actually good," and is robust to paraphrase — so it carries the most weight. |
-| retrieval_ref | **0.20** | Standard IR metrics, but answer-grounded relevance is lenient/inflated → moderate, not dominant. |
+| judge_retrieval | **0.20** | A *stricter*, question-grounded retrieval signal — trusted above the lenient answer-grounded reference metrics. |
 | generation_ref | **0.20** | Lexical/semantic overlap with verbose human emails is a weak correctness signal → moderate. |
-| judge_retrieval | **0.15** | A valuable *stricter* retrieval signal, but single-model judgment is noisy → below the generation judge. |
+| retrieval_ref | **0.15** | Standard IR metrics, but answer-grounded relevance is lenient/inflated → lowest retrieval weight. |
 | robustness | **0.10** | A stability/safety check; secondary to getting the answer right. |
 
 > These are a **reasonable default heuristic, not empirically tuned.** They

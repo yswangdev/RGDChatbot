@@ -10,9 +10,9 @@ from typing import Dict
 
 # Default family weights (sum to 1.0). Override via run_eval --weights.
 DEFAULT_WEIGHTS = {
-    "retrieval_ref": 0.20,
+    "retrieval_ref": 0.15,
     "generation_ref": 0.20,
-    "judge_retrieval": 0.15,
+    "judge_retrieval": 0.20,
     "judge_generation": 0.35,
     "robustness": 0.10,
 }
