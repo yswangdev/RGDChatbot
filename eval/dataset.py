@@ -44,6 +44,52 @@ _CONTACT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Promotional / spam patterns (marketing, SEO, link-building, solicitations).
+_SPAM_RE = re.compile(
+    r"(professional (writ|seo|market)|guest post|back ?link|link building|"
+    r"we (are|represent) one of|collaborat\w* opportunit|promote your|"
+    r"digital marketing|increase your (traffic|ranking)|business proposal|"
+    r"addiction (rehab|treatment|cent)|rehabilitation cent|"
+    r"\bcasino\b|\bcrypto\b|investment opportunit|sponsorship)",
+    re.IGNORECASE,
+)
+
+# Refusal / out-of-scope answers — the human reply declined rather than guiding
+# the user through the website, so it is not a useful generation reference.
+_DECLINE_RE = re.compile(
+    r"(not medical (doctors|professionals)|cannot give .*medical advice|"
+    r"we are not able to|we are unable to|i'?m afraid (we|that)|"
+    r"unfortunately,? we (cannot|can't|do not|don'?t)|we do not provide|"
+    r"outside (the |our )?scope|consult (your|a) (physician|doctor|genetic))",
+    re.IGNORECASE,
+)
+
+# Interrogative cues used to confirm the message is an actual question.
+_INTERROGATIVE_RE = re.compile(
+    r"(\?|\b(how|what|where|which|when|why|who|can|could|do|does|is|are|"
+    r"should|would|i'?d like to know|looking for|trying to)\b)",
+    re.IGNORECASE,
+)
+
+
+def _non_ascii_ratio(text: str) -> float:
+    if not text:
+        return 1.0
+    non_ascii = sum(1 for c in text if ord(c) > 127 or c == "�")
+    return non_ascii / len(text)
+
+
+def _is_spam(question: str) -> bool:
+    return bool(_SPAM_RE.search(question))
+
+
+def _is_decline(answer: str) -> bool:
+    return bool(_DECLINE_RE.search(answer))
+
+
+def _looks_like_question(question: str) -> bool:
+    return bool(_INTERROGATIVE_RE.search(question))
+
 
 def _block_text(node) -> str:
     """Extract a div's text, converting <br> to newlines."""
@@ -130,6 +176,7 @@ def select_eval_set(
     coverage_threshold: float = 0.5,
     min_question_chars: int = 20,
     min_answer_chars: int = 40,
+    max_non_ascii_ratio: float = 0.05,
 ) -> List[Dict]:
     """Filter to answerable guidance questions and deterministically sample ``n``.
 
@@ -141,12 +188,20 @@ def select_eval_set(
     for it in items:
         if not it["answered"] or it["type"] not in ANSWERABLE_TYPES:
             continue
-        if _is_admin(it):
+        if _is_admin(it) or _is_spam(it["question"]):
             continue
         if len(it["question"]) < min_question_chars:
             continue
+        # Drop garbled / non-English messages (encoding noise, foreign scripts).
+        if _non_ascii_ratio(it["question"]) > max_non_ascii_ratio:
+            continue
+        if not _looks_like_question(it["question"]):
+            continue
         cleaned = clean_answer(it["answer"])
         if len(cleaned) < min_answer_chars:
+            continue
+        # Drop refusal / out-of-scope answers — not corpus-grounded guidance.
+        if _is_decline(cleaned):
             continue
         candidates.append({**it, "reference_answer": cleaned})
 
