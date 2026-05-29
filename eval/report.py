@@ -131,7 +131,7 @@ def write_html(records: List[Dict], summary: Dict, path: str):
         f'<th colspan="{len(cols)}" class="grp">{html.escape(label)}</th>'
         for label, cols in GROUPS
     )
-    col_th = "".join(f"<th>{html.escape(h)}</th>" for _, h in COLUMNS)
+    col_th = "".join(f'<th class="colh">{html.escape(h)}</th>' for _, h in COLUMNS)
 
     def cell(record, key):
         v = _get(record, key)
@@ -154,13 +154,17 @@ body{{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f5f5;co
 h1{{color:#1a237e}} .stats{{display:flex;gap:10px;flex-wrap:wrap;margin:15px 0}}
 .stat-card{{background:#fff;border-radius:8px;padding:12px 18px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.12)}}
 .stat-card .number{{font-size:1.5em;font-weight:700;color:#1a237e}} .stat-card .label{{font-size:.72em;color:#666}}
-table{{border-collapse:collapse;width:100%;background:#fff;font-size:.78em}}
-th,td{{border:1px solid #e0e0e0;padding:6px 8px;text-align:center;vertical-align:top}}
-th{{background:#1a237e;color:#fff;position:sticky;top:0}}
-th.grp{{background:#0d1442;border-bottom:2px solid #fff;font-size:.9em}}
-td.qa{{text-align:left;max-width:260px;font-size:.95em}}
+table{{border-collapse:separate;border-spacing:0;width:100%;background:#fff;font-size:.78em}}
+th,td{{border:1px solid #e0e0e0;padding:6px 8px;text-align:center;vertical-align:top;
+  overflow-wrap:anywhere;word-break:break-word}}
+/* Two sticky header rows: group row pinned at top, column row just below it. */
+thead th{{position:sticky;z-index:2;background:#1a237e;color:#fff}}
+th.grp{{top:0;height:26px;z-index:3;background:#0d1442;border-bottom:2px solid #fff;font-size:.9em}}
+th.colh{{top:26px}}
+td.qa{{text-align:left;max-width:320px;font-size:.95em;white-space:normal}}
 tr.agg td{{background:#fff8e1;border-top:2px solid #f0c000}}
-.wrap{{overflow-x:auto}} .legend{{font-size:.8em;color:#666;margin:8px 0}}
+/* .wrap is the scroll container so the sticky header pins on vertical scroll. */
+.wrap{{max-height:82vh;overflow:auto}} .legend{{font-size:.8em;color:#666;margin:8px 0}}
 </style></head><body>
 <h1>RGD RAG Evaluation</h1>
 <div class="stats">{cards}</div>
