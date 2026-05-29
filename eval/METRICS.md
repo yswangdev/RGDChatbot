@@ -16,18 +16,61 @@ Two evaluation *methods* are applied to two *stages*:
 
 ## 1. Reference-based retrieval
 
-Relevance has no gold chunk labels, so a retrieved chunk is labeled **relevant
-to the question via its reference answer** (see `eval/relevance.py`):
+### How we decide if a retrieved chunk is "relevant"
+
+Normally, scoring retrieval needs a human to mark, for each question, which
+chunks in the corpus are the correct ones to retrieve ("gold labels"). We don't
+have that. Instead we use the question's **reference answer** (the real human
+help-desk reply) as a stand-in for "what the right answer looks like", and we
+call a retrieved chunk *relevant* if it resembles that reference answer. We
+check resemblance two ways:
+
+1. **Lexical overlap** — do the chunk and the reference answer use many of the
+   **same words, in the same order**? Scored with **ROUGE-L** (based on the
+   longest run of words they share), from 0 (no shared wording) to 1 (identical
+   wording).
+2. **Semantic overlap** — do they **mean** the same thing, even if they use
+   different words? We turn each text into an **embedding** (a list of numbers
+   that captures its meaning) and compare the two with **cosine similarity**,
+   from 0 (unrelated meaning) to 1 (same meaning).
+
+A chunk is given a **binary relevant / not-relevant label** if *either* signal
+is high enough, and a **graded relevance** number (used by NDCG) equal to the
+stronger of the two signals:
 
 ```
-lexical  = ROUGE-L F(reference_answer, chunk)          # word-overlap, [0,1]
-semantic = cosine(embed(reference_answer), embed(chunk))   # [0,1]
-relevant = (lexical >= 0.18) OR (semantic >= 0.55)     # binary label
-graded   = max(semantic, lexical)                      # graded relevance [0,1]
+lexical  = ROUGE-L(reference_answer, chunk)                # word overlap, 0..1
+semantic = cosine( embed(reference_answer), embed(chunk) ) # meaning overlap, 0..1
+
+relevant = True if (lexical >= 0.18) OR (semantic >= 0.55) else False
+graded   = max(lexical, semantic)                          # 0..1, for NDCG
 ```
 
-Metrics are computed over the retrieved candidate pool (top-N, N = max(2k,10)),
-with the recall denominator = relevant items found in that pool.
+The two thresholds (0.18 lexical, 0.55 semantic) are deliberately moderate; they
+live in `eval/relevance.py` and can be tuned. They are intentionally a bit
+**lenient**, which is why the reference-based retrieval numbers run high and
+should be cross-checked against the stricter LLM-judge retrieval scores (§3).
+
+### Worked example
+
+> **Question:** "How do I download GO annotations for rat genes?"
+> **Reference answer:** "You can download the GO annotations from the RGD FTP
+> site, under the annotated_rgd_objects data release files."
+
+| Retrieved chunk (snippet) | lexical | semantic | relevant? | graded |
+|---|---|---|---|---|
+| "…GO annotation files are available for download on the RGD FTP site at /data_release/…" | 0.24 | 0.71 | **yes** (both clear 0.18 / 0.55) | 0.71 |
+| "…the ontology browser lets you search GO terms by keyword…" | 0.06 | 0.42 | **no** (neither threshold met) | 0.42 |
+| "…JBrowse displays variant and gene tracks across the genome…" | 0.03 | 0.18 | **no** | 0.18 |
+
+So for this question, of the chunks shown, one is labeled relevant. The five
+metrics below are then computed from this ordered list of labels.
+
+### The metrics
+
+Metrics are computed over the retrieved **candidate pool** — the top-N chunks
+actually fetched (N = max(2·k, 10)) — and the recall denominator is the number
+of relevant chunks found in that pool. `k` is the cutoff (default 5).
 
 | Metric | Range | Meaning | Formula |
 |---|---|---|---|
@@ -182,3 +225,52 @@ Default weights (`eval/scoring.py:DEFAULT_WEIGHTS`, override with `--weights`):
 > encode the priority "trust the strong judge's correctness most, treat lexical
 > reference metrics as a floor." Adjust to your priorities, e.g.
 > `--weights judge_retrieval=0.25,retrieval_ref=0.10`.
+
+---
+
+## 9. Terminology / glossary
+
+- **Chunk** — a passage the corpus was split into for retrieval (≈800 tokens).
+  The chatbot retrieves chunks and answers from them.
+- **Reference answer** — the real human help-desk answer to a question, used as
+  the "ground truth" to compare against. Cleaned of greetings/signatures.
+- **Candidate / RAG answer** — the answer the chatbot generated, the thing being
+  evaluated.
+- **Lexical** — based on the **literal words** (surface text), regardless of
+  meaning. "car" and "automobile" have *no* lexical overlap.
+- **Semantic** — based on **meaning**. "car" and "automobile" have *high*
+  semantic similarity even though the words differ.
+- **Token** — roughly a word-piece; text is counted/split in tokens (≈4
+  characters each in English).
+- **n-gram** — a run of *n* consecutive tokens. "rat genome database" contains
+  the 2-grams (bigrams) "rat genome" and "genome database". Many lexical metrics
+  count shared n-grams.
+- **Stemming** — reducing words to a common root so variants match: "annotated",
+  "annotation", "annotations" all collapse to "annotat-". METEOR uses stemming
+  so paraphrases count as matches.
+- **Synonym matching** — treating different words with the same meaning as a
+  match (e.g. "download" ≈ "retrieve"). METEOR does light synonym matching.
+- **LCS (longest common subsequence)** — the longest sequence of words that
+  appears in both texts in the same order (not necessarily adjacent). ROUGE-L is
+  based on the LCS length.
+- **Embedding** — a list of numbers (a vector) produced by a model that
+  represents a text's meaning, so that similar meanings have nearby vectors.
+  Here, produced by `mxbai-embed-large` (the same model used for retrieval).
+- **Cosine similarity** — a measure of how aligned two vectors are, from −1 to 1
+  (here effectively 0 to 1). 1 = same direction (same meaning), 0 = unrelated.
+- **Graded relevance** — a relevance value on a scale (0–1) rather than just
+  yes/no; lets NDCG reward "very relevant" above "somewhat relevant".
+- **DCG / NDCG** — Discounted Cumulative Gain: sums chunk relevance but discounts
+  chunks ranked lower. **N**DCG normalizes it by the best possible ordering, so
+  1.0 = the most relevant chunks were ranked first.
+- **MRR (Mean Reciprocal Rank)** — focuses on the position of the *first*
+  relevant chunk (1/rank).
+- **Faithfulness / grounding** — whether the answer's claims are actually
+  supported by the retrieved chunks (as opposed to **hallucinated** = made up).
+- **Baseline-rescaled (BERTScore)** — BERTScore raw values are very high for any
+  text pair; "rescaling with baseline" subtracts the score expected from random
+  text, re-centering so ~0 means "no better than random" and negatives mean
+  "below random". This is why BERTScore can be negative.
+- **k / top-k** — the number of chunks kept and used to answer (default 5).
+- **Pool (top-N)** — a slightly larger set of retrieved chunks (N = max(2k,10))
+  used as the denominator when computing recall.
