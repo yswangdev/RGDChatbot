@@ -5,9 +5,6 @@ A Retrieval-Augmented Generation (RAG) assistant for the **Rat Genome Database
 **Ollama** for embeddings and generation and **PostgreSQL + pgvector** for
 vector storage (with ChromaDB available as a local fallback).
 
-This is **Phase 1** (the retrieval foundation). A web app with streaming,
-per-session conversation memory, and an upload/delete UI is planned for Phase 2.
-
 ## Architecture
 
 - **Embeddings / LLM**: Ollama (`mxbai-embed-large:latest` + `llama3.2`) at
@@ -94,3 +91,40 @@ page numbers, and any relevant RGD link) is appended to each answer.
 --clear              Clear the collection
 --inspect-pdfs       Print PDF extraction stats (no indexing)
 ```
+
+## Evaluation (`eval/`)
+
+A harness that scores the RAG system on a fixed set of real RGD help-desk
+questions ([`qa_report.html`](qa_report.html)) using **two methods** — classic
+**reference-based** metrics and **LLM-as-a-judge** — across both **retrieval**
+and **generation**, plus a **robustness** stress test, combined into one
+overall score.
+
+```bash
+pip install -r requirements.txt          # adds beautifulsoup4, sacrebleu, rouge-score, nltk, bert-score
+python -m eval.run_eval --n 50 --pg-dsn "$PG_DSN"
+# faster iteration:
+python -m eval.run_eval --n 50 --limit 5 --no-bertscore
+```
+
+What it measures, all on the **same** auto-selected 50 answerable questions:
+
+- **Reference-based retrieval**: precision@k, recall@k, hit-rate, MRR, NDCG@k,
+  RAGAS context-recall — chunk relevance derived from the reference answers
+  (lexical ROUGE-L + semantic embedding similarity).
+- **Reference-based generation**: BLEU, ROUGE-1/2/L, METEOR, token-F1, BERTScore
+  (RAG answer vs the cleaned human answer).
+- **LLM-as-judge** (`qwen2.5:7b`): per-chunk relevance (0–3), context quality
+  (1–5), and answer faithfulness / correctness / relevance / completeness (1–5).
+- **Robustness**: each question re-asked with typos / case / noise / prompt
+  injection; score = answer stability (embedding cosine vs the original answer).
+- **Overall**: each family normalized to [0,1] and combined by a configurable
+  weighted average ([`eval/scoring.py`](eval/scoring.py); override with `--weights`).
+
+Outputs (under `data/eval/`, gitignored): `eval_report.html` and
+`eval_results.csv` — a per-question table of `Q | reference A | RAG A | every
+score | overall` plus an aggregate row — and `summary.json`.
+
+Useful flags: `--n` (set size), `--limit` (debug subset), `--k` (top-k),
+`--no-bertscore` (skip the heavy torch download), `--no-judge`, `--no-stress`,
+`--judge-model`, `--rebuild-set`, `--vector-backend chroma`.

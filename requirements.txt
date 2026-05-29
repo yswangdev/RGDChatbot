@@ -16,3 +16,10 @@ numpy>=1.24.0
 
 # Vector store: ChromaDB (fallback backend)
 chromadb>=0.4.0
+
+# Evaluation harness (eval/)
+beautifulsoup4>=4.12.0
+sacrebleu>=2.3.0
+rouge-score>=0.1.2
+nltk>=3.8.0
+bert-score>=0.3.13

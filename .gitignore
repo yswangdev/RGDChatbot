@@ -7,6 +7,9 @@ ENV/
 chroma_db/
 *.db
 
+# Evaluation outputs
+data/eval/
+
 # Python
 __pycache__/
 *.py[cod]
