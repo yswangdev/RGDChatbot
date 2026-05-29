@@ -241,3 +241,31 @@ def load_or_build_eval_set(
         for it in selected:
             f.write(json.dumps(it, ensure_ascii=False) + "\n")
     return selected
+
+
+def dump_all_qa(qa_report: str, out_path: str) -> List[Dict]:
+    """Write every parsed Q&A pair from the report to JSONL (no filtering).
+
+    Each record carries the raw fields plus ``reference_answer`` (the cleaned
+    answer). Useful as a full dataset alongside the filtered ``eval_set.jsonl``.
+    """
+    items = parse_qa_report(qa_report)
+    for it in items:
+        it["reference_answer"] = clean_answer(it["answer"])
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        for it in items:
+            f.write(json.dumps(it, ensure_ascii=False) + "\n")
+    return items
+
+
+if __name__ == "__main__":
+    import argparse
+
+    p = argparse.ArgumentParser(description="Dump all website Q&A to JSONL")
+    p.add_argument("--qa-report", default="qa_report.html")
+    p.add_argument("--out", default="data/eval/all_qa.jsonl")
+    a = p.parse_args()
+    items = dump_all_qa(a.qa_report, a.out)
+    answered = sum(1 for i in items if i["answered"])
+    print(f"Wrote {len(items)} Q&A ({answered} answered) to {a.out}")
