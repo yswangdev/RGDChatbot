@@ -1,0 +1,27 @@
+# Local PostgreSQL + pgvector for the RGD chatbot.
+#   docker compose up -d
+# Then point the app at it:
+#   export PG_DSN="postgresql://rgd:rgd@localhost:5432/rgd"
+#   python rag_cli.py --build
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: rgd-pgvector
+    environment:
+      POSTGRES_USER: rgd
+      POSTGRES_PASSWORD: rgd
+      POSTGRES_DB: rgd
+    ports:
+      - "5432:5432"
+    volumes:
+      - rgd_pgdata:/var/lib/postgresql/data
+      # Applies schema.sql on first initialization of an empty data dir.
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rgd -d rgd"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  rgd_pgdata:
