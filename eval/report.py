@@ -59,6 +59,11 @@ GROUPS: List[Tuple[str, List[Tuple[str, str]]]] = [
 # Flattened column list.
 COLUMNS = [(key, header) for _, cols in GROUPS for key, header in cols]
 TEXT_KEYS = {"id", "type", "question", "reference_answer", "rag_answer", "judge_generation.rationale"}
+# Only these normalized [0,1] columns get the heatmap.
+COLOR_KEYS = {
+    "families.retrieval_ref", "families.generation_ref", "families.judge_retrieval",
+    "families.judge_generation", "families.robustness", "overall",
+}
 
 
 def _get(record: Dict, path: str):
@@ -107,16 +112,16 @@ def write_markdown(records: List[Dict], summary: Dict, path: str):
 
 
 def _color(key, v):
-    if key in TEXT_KEYS:
+    # Only the normalized family scores and the overall get a heatmap; the raw
+    # per-metric columns (different scales) are left uncolored.
+    if key not in COLOR_KEYS:
         return ""
     try:
         v = float(v)
     except (TypeError, ValueError):
         return ""
-    if 0.0 <= v <= 1.0:  # only the normalized [0,1] scores get a heatmap
-        r = int(255 * (1 - v)); g = int(180 * v)
-        return f' style="background:rgba({r},{g},80,0.18)"'
-    return ""
+    r = int(255 * (1 - v)); g = int(180 * v)
+    return f' style="background:rgba({r},{g},80,0.18)"'
 
 
 def write_html(records: List[Dict], summary: Dict, path: str):

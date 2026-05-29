@@ -91,6 +91,39 @@ def _looks_like_question(question: str) -> bool:
     return bool(_INTERROGATIVE_RE.search(question))
 
 
+# Cues that a question is about *using/navigating the RGD website* (web-guide)
+# rather than a raw data/research request.
+_GUIDE_RE = re.compile(
+    r"(how (do|can|would|to)|where (can|do|is|are|to|should)|"
+    r"\bfind\b|\bsearch\b|\blook ?up\b|\blocate\b|\bdownload\b|\bexport\b|\baccess\b|"
+    r"\bview\b|\bdisplay\b|\bnavigate\b|\bbrowse\b|\bfilter\b|"
+    r"\bpage\b|\btool\b|\bbrowser\b|jbrowse|genome browser|ontology browser|"
+    r"\bportal\b|\btrack\b|report page|\bwebsite\b|\bweb ?site\b|\bsite\b|"
+    r"\blink\b|\bmenu\b|\btab\b|how is .* (used|displayed)|what does .* mean)",
+    re.IGNORECASE,
+)
+
+
+def _guide_score(question: str) -> int:
+    """Count distinct web-guide cues in a question (higher = more how-to)."""
+    return len(set(m.group(0).lower() for m in _GUIDE_RE.finditer(question)))
+
+
+# Strong web-guide phrasing: an explicit how-to / where-to question about using
+# the site. This is the gate (the cue count above is just supplementary).
+_STRONG_GUIDE_RE = re.compile(
+    r"(how (do|can|could|would|should|to)\b|"
+    r"where (can|do|to|should|is|are)\b|"
+    r"how (is|are|do|can) .{0,50}\b(use|used|using|display|view|access|download|find|search)\b|"
+    r"what does .{0,50}\bmean\b|how is .{0,40}\b(calculated|defined|displayed))",
+    re.IGNORECASE,
+)
+
+
+def _is_strong_guide(question: str) -> bool:
+    return bool(_STRONG_GUIDE_RE.search(question))
+
+
 def _block_text(node) -> str:
     """Extract a div's text, converting <br> to newlines."""
     for br in node.find_all("br"):
@@ -208,17 +241,25 @@ def select_eval_set(
     min_question_chars: int = 20,
     min_answer_chars: int = 40,
     max_non_ascii_ratio: float = 0.05,
+    require_guide: bool = True,
 ) -> List[Dict]:
     """Filter to answerable guidance questions and deterministically sample ``n``.
 
     Filtering keeps answered Help/Tool questions, drops administrative/curation
-    requests, and gates on corpus coverage (top-1 retrieval similarity).
-    Each kept item gets a cleaned ``reference_answer``.
+    requests, and (when ``require_guide``) keeps only **web-guide / how-to**
+    questions about using the RGD website. Gates on corpus coverage (top-1
+    retrieval similarity). Each kept item gets a cleaned ``reference_answer``.
     """
     candidates = filter_candidates(
         items, min_question_chars=min_question_chars,
         min_answer_chars=min_answer_chars, max_non_ascii_ratio=max_non_ascii_ratio,
     )
+
+    # Keep web-guide / how-to questions (explicit how-to/where phrasing).
+    if require_guide:
+        for c in candidates:
+            c["guide_score"] = _guide_score(c["question"])
+        candidates = [c for c in candidates if _is_strong_guide(c["question"])]
 
     # Deterministic order before the coverage gate.
     candidates.sort(key=lambda x: x["id"])
