@@ -136,7 +136,17 @@ def write_html(records: List[Dict], summary: Dict, path: str):
         f'<th colspan="{len(cols)}" class="grp">{html.escape(label)}</th>'
         for label, cols in GROUPS
     )
-    col_th = "".join(f'<th class="colh">{html.escape(h)}</th>' for _, h in COLUMNS)
+    # Family/overall columns get a clickable sort arrow.
+    col_th_parts = []
+    for idx, (key, h) in enumerate(COLUMNS):
+        if key in COLOR_KEYS:
+            col_th_parts.append(
+                f'<th class="colh sortable" onclick="sortTable({idx})" title="Click to sort">'
+                f'{html.escape(h)}<span class="arrow">⇅</span></th>'
+            )
+        else:
+            col_th_parts.append(f'<th class="colh">{html.escape(h)}</th>')
+    col_th = "".join(col_th_parts)
 
     def cell(record, key):
         v = _get(record, key)
@@ -173,17 +183,42 @@ th.colh{{top:30px;z-index:2}}
 td.qa{{text-align:left;white-space:normal;overflow-wrap:anywhere;word-break:break-word;
   min-width:240px;max-width:340px;font-size:.95em}}
 tr.agg td{{background:#fff8e1;border-top:2px solid #f0c000}}
+th.sortable{{cursor:pointer}} th.sortable:hover{{background:#283593}}
+.arrow{{font-size:.85em;margin-left:3px;color:#9fa8da}}
 /* .wrap is the scroll container so the sticky header pins on vertical scroll. */
 .wrap{{max-height:82vh;overflow:auto}} .legend{{font-size:.8em;color:#666;margin:8px 0}}
 </style></head><body>
 <h1>RGD RAG Evaluation</h1>
 <div class="stats">{cards}</div>
 <div class="legend">Heatmap applies to normalized [0,1] scores. Judge columns are raw scales
-(0-3 or 1-5). Aggregate row = mean of each numeric column over {len(records)} questions.</div>
+(0-3 or 1-5). Aggregate row = mean of each numeric column over {len(records)} questions.
+Click a ⇅ column header to sort.</div>
 <div class="wrap"><table>
 <thead><tr>{group_th}</tr><tr>{col_th}</tr></thead>
 <tbody>{agg_row}{rows}</tbody>
-</table></div></body></html>"""
+</table></div>
+<script>
+let sortDir = {{}};
+function sortTable(col) {{
+  const tb = document.querySelector('table tbody');
+  const rows = Array.from(tb.rows);
+  const agg = rows.filter(r => r.classList.contains('agg'));   // keep pinned on top
+  const data = rows.filter(r => !r.classList.contains('agg'));
+  const dir = sortDir[col] === 'desc' ? 'asc' : 'desc';
+  sortDir = {{}}; sortDir[col] = dir;
+  const num = t => {{ const v = parseFloat(t); return isNaN(v) ? -Infinity : v; }};
+  data.sort((a, b) => {{
+    const x = num(a.cells[col].textContent), y = num(b.cells[col].textContent);
+    return dir === 'asc' ? x - y : y - x;
+  }});
+  tb.replaceChildren(...agg, ...data);
+  document.querySelectorAll('th.sortable .arrow').forEach(a => a.textContent = '⇅');
+  const ths = document.querySelectorAll('thead tr:last-child th');
+  const arrow = ths[col] && ths[col].querySelector('.arrow');
+  if (arrow) arrow.textContent = dir === 'asc' ? '▲' : '▼';
+}}
+</script>
+</body></html>"""
     with open(path, "w", encoding="utf-8") as f:
         f.write(doc)
 
