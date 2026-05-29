@@ -1,6 +1,18 @@
 ollama>=0.1.0
-chromadb>=0.4.0
-sentence-transformers>=2.2.0
 python-dotenv>=1.0.0
+
+# PDF extraction
 pdfplumber>=0.10.0
 PyPDF2>=3.0.0
+
+# Sentence-aware chunking
+langchain-text-splitters>=0.2.0
+tiktoken>=0.5.0
+
+# Vector store: PostgreSQL + pgvector (primary)
+psycopg[binary]>=3.1.0
+pgvector>=0.2.5
+numpy>=1.24.0
+
+# Vector store: ChromaDB (fallback backend)
+chromadb>=0.4.0
