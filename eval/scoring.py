@@ -41,17 +41,20 @@ def family_scores(record: Dict) -> Dict[str, float]:
     judge_generation {faithfulness, correctness, answer_relevance, completeness (1-5)},
     robustness {stability (0-1)}.
     """
+    # hit_rate dropped: it is mathematically redundant (hit_rate=1 iff MRR>0).
     r = record.get("retrieval", {})
     retrieval_ref = _mean([
-        r.get("precision_at_k"), r.get("recall_at_k"), r.get("hit_rate"),
+        r.get("precision_at_k"), r.get("recall_at_k"),
         r.get("mrr"), r.get("ndcg_at_k"), r.get("context_recall"),
     ])
 
+    # Trimmed to non-redundant aspects: ROUGE-L, METEOR, BERTScore.
+    # BERTScore is baseline-rescaled (can be negative; ~0 == baseline), so clamp
+    # to [0,1] before averaging into the normalized family score.
     g = record.get("generation", {})
-    generation_ref = _mean([
-        g.get("bleu"), g.get("rouge1"), g.get("rouge2"), g.get("rougeL"),
-        g.get("meteor"), g.get("token_f1"), g.get("bertscore"),
-    ])
+    bert = g.get("bertscore")
+    bert = max(0.0, bert) if isinstance(bert, (int, float)) else None
+    generation_ref = _mean([g.get("rougeL"), g.get("meteor"), bert])
 
     jr = record.get("judge_retrieval", {})
     judge_retrieval = _mean([

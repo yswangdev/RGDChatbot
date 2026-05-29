@@ -46,7 +46,6 @@ def evaluate_item(item, rag, embedder, judge, args):
     retrieval = {
         "precision_at_k": rm.precision_at_k(rels, args.k),
         "recall_at_k": rm.recall_at_k(rels, args.k),
-        "hit_rate": rm.hit_rate(rels, args.k),
         "mrr": rm.mrr(rels),
         "ndcg_at_k": rm.ndcg_at_k(grades, args.k),
         "context_recall": rm.context_recall(split_sentences(reference), topk_texts, embedder),

@@ -1,52 +1,70 @@
 """
-Render the evaluation deliverable: a per-question table (Q | reference A |
-RAG A | each score | overall) plus an aggregate row, as HTML + CSV + Markdown.
+Render the evaluation deliverable: a per-question table grouped by evaluation
+method (reference retrieval / reference generation / judge retrieval / judge
+generation / robustness / combined), with an aggregate row, as HTML + CSV + MD.
+
+Each column is tagged with the method it belongs to via a grouped header row
+(HTML) and a method-label header row (CSV).
 """
 
 import csv
 import html
-import json
 import os
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
-# Flat metric columns shown in the table (key path -> short header).
-SCORE_COLUMNS = [
-    ("retrieval.precision_at_k", "P@k"),
-    ("retrieval.recall_at_k", "R@k"),
-    ("retrieval.hit_rate", "Hit"),
-    ("retrieval.mrr", "MRR"),
-    ("retrieval.ndcg_at_k", "NDCG"),
-    ("retrieval.context_recall", "CtxRec"),
-    ("generation.bleu", "BLEU"),
-    ("generation.rouge1", "R-1"),
-    ("generation.rouge2", "R-2"),
-    ("generation.rougeL", "R-L"),
-    ("generation.meteor", "METEOR"),
-    ("generation.token_f1", "TokF1"),
-    ("generation.bertscore", "BERTSc"),
-    ("judge_retrieval.chunk_relevance_avg", "J:ChunkRel(0-3)"),
-    ("judge_retrieval.context_quality", "J:CtxQual(1-5)"),
-    ("judge_generation.faithfulness", "J:Faith(1-5)"),
-    ("judge_generation.correctness", "J:Correct(1-5)"),
-    ("judge_generation.answer_relevance", "J:Relev(1-5)"),
-    ("judge_generation.completeness", "J:Complete(1-5)"),
-    ("robustness.stability", "Robust"),
-    ("families.retrieval_ref", "F:RetrRef"),
-    ("families.generation_ref", "F:GenRef"),
-    ("families.judge_retrieval", "F:JRetr"),
-    ("families.judge_generation", "F:JGen"),
-    ("families.robustness", "F:Robust"),
-    ("overall", "OVERALL"),
+# (method group label, [(record key path, column header), ...])
+GROUPS: List[Tuple[str, List[Tuple[str, str]]]] = [
+    ("", [("id", "ID"), ("type", "Type")]),
+    ("Question & answers", [
+        ("question", "Question"),
+        ("reference_answer", "Reference A"),
+        ("rag_answer", "RAG A"),
+    ]),
+    ("Reference-based retrieval", [
+        ("retrieval.precision_at_k", "P@k"),
+        ("retrieval.recall_at_k", "R@k"),
+        ("retrieval.mrr", "MRR"),
+        ("retrieval.ndcg_at_k", "NDCG"),
+        ("retrieval.context_recall", "CtxRecall"),
+    ]),
+    ("Reference-based generation", [
+        ("generation.rougeL", "ROUGE-L"),
+        ("generation.meteor", "METEOR"),
+        ("generation.bertscore", "BERTScore"),
+    ]),
+    ("LLM-judge retrieval", [
+        ("judge_retrieval.chunk_relevance_avg", "ChunkRel(0-3)"),
+        ("judge_retrieval.context_quality", "CtxQual(1-5)"),
+    ]),
+    ("LLM-judge generation", [
+        ("judge_generation.faithfulness", "Faith(1-5)"),
+        ("judge_generation.correctness", "Correct(1-5)"),
+        ("judge_generation.answer_relevance", "Relev(1-5)"),
+        ("judge_generation.completeness", "Complete(1-5)"),
+        ("judge_generation.rationale", "Judge rationale"),
+    ]),
+    ("Robustness", [
+        ("robustness.stability", "Stability"),
+    ]),
+    ("Combined (normalized families + overall)", [
+        ("families.retrieval_ref", "RefRetr"),
+        ("families.generation_ref", "RefGen"),
+        ("families.judge_retrieval", "JudgeRetr"),
+        ("families.judge_generation", "JudgeGen"),
+        ("families.robustness", "Robust"),
+        ("overall", "OVERALL"),
+    ]),
 ]
+
+# Flattened column list.
+COLUMNS = [(key, header) for _, cols in GROUPS for key, header in cols]
+TEXT_KEYS = {"id", "type", "question", "reference_answer", "rag_answer", "judge_generation.rationale"}
 
 
 def _get(record: Dict, path: str):
     node = record
     for part in path.split("."):
-        if isinstance(node, dict):
-            node = node.get(part)
-        else:
-            return None
+        node = node.get(part) if isinstance(node, dict) else None
     return node
 
 
@@ -59,20 +77,24 @@ def _fmt(v):
 
 
 def write_csv(records: List[Dict], path: str):
-    headers = ["id", "type", "question", "reference_answer", "rag_answer"] + [h for _, h in SCORE_COLUMNS]
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(headers)
+        # Row 1: method group labels, repeated across each group's span.
+        group_row = []
+        for label, cols in GROUPS:
+            group_row.extend([label] * len(cols))
+        w.writerow(group_row)
+        # Row 2: column headers.
+        w.writerow([h for _, h in COLUMNS])
+        # Data rows.
         for r in records:
-            row = [r["id"], r.get("type", ""), r["question"], r["reference_answer"], r["rag_answer"]]
-            row += [_fmt(_get(r, key)) for key, _ in SCORE_COLUMNS]
-            w.writerow(row)
+            w.writerow([_fmt(_get(r, key)) for key, _ in COLUMNS])
 
 
 def write_markdown(records: List[Dict], summary: Dict, path: str):
     lines = ["# RAG Evaluation Report", ""]
     lines.append(f"**System overall: {summary.get('overall', 0):.3f}** over {summary.get('n', 0)} questions\n")
-    lines.append("## Family means")
+    lines.append("## Family means (normalized 0-1)")
     for fam, val in summary.get("family_means", {}).items():
         lines.append(f"- {fam}: {val:.3f}")
     lines.append("\n## Per-question overall")
@@ -84,6 +106,19 @@ def write_markdown(records: List[Dict], summary: Dict, path: str):
         f.write("\n".join(lines))
 
 
+def _color(key, v):
+    if key in TEXT_KEYS:
+        return ""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return ""
+    if 0.0 <= v <= 1.0:  # only the normalized [0,1] scores get a heatmap
+        r = int(255 * (1 - v)); g = int(180 * v)
+        return f' style="background:rgba({r},{g},80,0.18)"'
+    return ""
+
+
 def write_html(records: List[Dict], summary: Dict, path: str):
     cards = "".join(
         f'<div class="stat-card"><div class="number">{v:.3f}</div>'
@@ -91,58 +126,48 @@ def write_html(records: List[Dict], summary: Dict, path: str):
         for k, v in {**{"OVERALL": summary.get("overall", 0)}, **summary.get("family_means", {})}.items()
     )
 
-    head = "".join(f"<th>{html.escape(h)}</th>" for _, h in SCORE_COLUMNS)
+    # Two-row header: method groups (colspan) then column names.
+    group_th = "".join(
+        f'<th colspan="{len(cols)}" class="grp">{html.escape(label)}</th>'
+        for label, cols in GROUPS
+    )
+    col_th = "".join(f"<th>{html.escape(h)}</th>" for _, h in COLUMNS)
 
-    def color(v):
-        try:
-            v = float(v)
-        except (TypeError, ValueError):
-            return ""
-        # green-ish for high, red-ish for low (only for [0,1] scores)
-        if v <= 1.0:
-            r = int(255 * (1 - v)); g = int(180 * v)
-            return f' style="background:rgba({r},{g},80,0.18)"'
-        return ""
+    def cell(record, key):
+        v = _get(record, key)
+        cls = ' class="qa"' if key in TEXT_KEYS and key not in ("id", "type") else ""
+        return f"<td{cls}{_color(key, v)}>{html.escape(_fmt(v))}</td>"
 
-    rows = ""
-    for r in records:
-        score_cells = ""
-        for key, _ in SCORE_COLUMNS:
-            v = _get(r, key)
-            score_cells += f"<td{color(v)}>{_fmt(v)}</td>"
-        rows += (
-            f'<tr><td>{html.escape(str(r["id"]))}</td><td>{html.escape(r.get("type",""))}</td>'
-            f'<td class="qa">{html.escape(r["question"])}</td>'
-            f'<td class="qa">{html.escape(r["reference_answer"])}</td>'
-            f'<td class="qa">{html.escape(r["rag_answer"])}</td>'
-            f"{score_cells}</tr>"
-        )
+    rows = "".join("<tr>" + "".join(cell(r, key) for key, _ in COLUMNS) + "</tr>" for r in records)
 
-    # Aggregate row (means of normalized columns; raw judge means shown too).
+    # Aggregate row: mean of numeric columns, blanks for text columns.
     agg_cells = ""
-    for key, _ in SCORE_COLUMNS:
+    for key, _ in COLUMNS:
         vals = [_get(r, key) for r in records]
         vals = [v for v in vals if isinstance(v, (int, float))]
         agg_cells += f"<td><b>{(sum(vals)/len(vals)):.3f}</b></td>" if vals else "<td></td>"
-    agg_row = f'<tr class="agg"><td colspan="5"><b>AGGREGATE (mean of {len(records)})</b></td>{agg_cells}</tr>'
+    agg_row = f'<tr class="agg">{agg_cells}</tr>'
 
     doc = f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <title>RGD RAG Evaluation</title><style>
 body{{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f5f5;color:#222;margin:0;padding:20px}}
 h1{{color:#1a237e}} .stats{{display:flex;gap:10px;flex-wrap:wrap;margin:15px 0}}
 .stat-card{{background:#fff;border-radius:8px;padding:12px 18px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.12)}}
-.stat-card .number{{font-size:1.5em;font-weight:700;color:#1a237e}} .stat-card .label{{font-size:.75em;color:#666}}
-table{{border-collapse:collapse;width:100%;background:#fff;font-size:.8em}}
-th,td{{border:1px solid #e0e0e0;padding:6px 8px;text-align:center}}
+.stat-card .number{{font-size:1.5em;font-weight:700;color:#1a237e}} .stat-card .label{{font-size:.72em;color:#666}}
+table{{border-collapse:collapse;width:100%;background:#fff;font-size:.78em}}
+th,td{{border:1px solid #e0e0e0;padding:6px 8px;text-align:center;vertical-align:top}}
 th{{background:#1a237e;color:#fff;position:sticky;top:0}}
-td.qa{{text-align:left;max-width:280px;font-size:.95em;vertical-align:top}}
-tr.agg td{{background:#fff8e1}}
-.wrap{{overflow-x:auto}}
+th.grp{{background:#0d1442;border-bottom:2px solid #fff;font-size:.9em}}
+td.qa{{text-align:left;max-width:260px;font-size:.95em}}
+tr.agg td{{background:#fff8e1;border-top:2px solid #f0c000}}
+.wrap{{overflow-x:auto}} .legend{{font-size:.8em;color:#666;margin:8px 0}}
 </style></head><body>
 <h1>RGD RAG Evaluation</h1>
 <div class="stats">{cards}</div>
+<div class="legend">Heatmap applies to normalized [0,1] scores. Judge columns are raw scales
+(0-3 or 1-5). Aggregate row = mean of each numeric column over {len(records)} questions.</div>
 <div class="wrap"><table>
-<thead><tr><th>ID</th><th>Type</th><th>Question</th><th>Reference A</th><th>RAG A</th>{head}</tr></thead>
+<thead><tr>{group_th}</tr><tr>{col_th}</tr></thead>
 <tbody>{agg_row}{rows}</tbody>
 </table></div></body></html>"""
     with open(path, "w", encoding="utf-8") as f:

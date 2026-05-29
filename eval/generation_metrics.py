@@ -2,19 +2,21 @@
 Reference-based generation metrics: compare the RAG answer (candidate) to the
 cleaned human reference answer.
 
-Lexical: BLEU, ROUGE-1/2/L, METEOR, token-F1 (all in [0,1]).
-Semantic: BERTScore F1 (lazily loaded; skip with use_bertscore=False to avoid
-the torch/transformers download).
+The lexical metrics are deliberately trimmed to a non-redundant pair — BLEU /
+ROUGE-1 / ROUGE-2 / token-F1 all measure the same n-gram overlap and correlate
+heavily, so we keep only:
+
+- ROUGE-L: longest-common-subsequence overlap (word order / structure).
+- METEOR: stem- and synonym-aware overlap (the only lexically flexible one).
+- BERTScore: semantic similarity (paraphrase-tolerant); lazily loaded, skip with
+  use_bertscore=False to avoid the torch/transformers download.
 """
 
-from typing import Dict, Optional
+from typing import Dict
 
-import sacrebleu
 from rouge_score import rouge_scorer
 
-from eval.relevance import token_f1
-
-_ROUGE = rouge_scorer.RougeScorer(["rouge1", "rouge2", "rougeL"], use_stemmer=True)
+_ROUGE = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=True)
 _NLTK_READY = False
 _BERT_SCORER = None
 
@@ -64,19 +66,17 @@ def _bertscore(candidate: str, reference: str) -> float:
 
 
 def compute_generation_metrics(candidate: str, reference: str, use_bertscore: bool = True) -> Dict[str, float]:
-    """Return reference-based generation scores, all normalized to [0,1]."""
+    """Return reference-based generation scores, all normalized to [0,1].
+
+    Trimmed to non-redundant aspects: ROUGE-L (structure), METEOR (flexible
+    lexical), and BERTScore (semantic).
+    """
     candidate = candidate or ""
     reference = reference or ""
 
-    bleu = sacrebleu.sentence_bleu(candidate, [reference]).score / 100.0
-    rouge = _ROUGE.score(reference, candidate)
     metrics = {
-        "bleu": bleu,
-        "rouge1": rouge["rouge1"].fmeasure,
-        "rouge2": rouge["rouge2"].fmeasure,
-        "rougeL": rouge["rougeL"].fmeasure,
+        "rougeL": _ROUGE.score(reference, candidate)["rougeL"].fmeasure,
         "meteor": _meteor(candidate, reference),
-        "token_f1": token_f1(reference, candidate),
     }
     if use_bertscore:
         metrics["bertscore"] = _bertscore(candidate, reference)
