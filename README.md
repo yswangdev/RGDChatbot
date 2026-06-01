@@ -16,6 +16,27 @@ vector storage (with ChromaDB available as a local fallback).
 - **Prioritization**: [`corpus_config.py`](corpus_config.py) ranks website
   help (`RGDHelpMarkdown/`) above research papers (`papers/`).
 
+## Repository layout
+
+```
+RAG.py            RAGSystem: embeddings, chunking, retrieval, cited generation
+rag_cli.py        CLI: build/query/manage the index
+vectorstore.py    VectorStore abstraction (pgvector default, chroma fallback)
+chunking.py       Sentence/markdown-aware chunking
+corpus_config.py  Document prioritization rules
+schema.sql        Postgres + pgvector schema
+docker-compose.yml  Local pgvector for development
+RGDHelpMarkdown/  Website help docs (primary corpus)
+papers/           Background research papers (secondary corpus)
+eval/             Evaluation harness — see eval/METRICS.md
+```
+
+The **evaluation harness** ([`eval/`](eval)) scores retrieval and generation
+with reference-based metrics + an LLM-as-judge and combines them into one
+overall score; every metric is documented in [`eval/METRICS.md`](eval/METRICS.md).
+It expects a help-desk export `qa_report.html` at the repo root — this file is
+**git-ignored** because it contains personal names/emails, so supply your own.
+
 ## Setup
 
 1. **Virtual environment + dependencies**

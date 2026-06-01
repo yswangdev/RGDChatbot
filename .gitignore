@@ -10,6 +10,9 @@ chroma_db/
 # Evaluation outputs
 data/eval/
 
+# Help-desk export (contains personal names/emails — keep out of the repo)
+qa_report.html
+
 # Python
 __pycache__/
 *.py[cod]
